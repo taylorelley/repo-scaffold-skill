@@ -53,49 +53,17 @@ npm create vite@latest . -- --template react-ts
 npm install
 ```
 
-### Step 2 — Install runtime dependencies
+### Step 2 — Write config files
+
+> **Important:** Config files must be written _before_ running shadcn init. shadcn reads
+> `vite.config.ts` and `tsconfig.json` to detect Tailwind and the `@/*` path alias.
+
+Vite 6 generates a `tsconfig.app.json` alongside `tsconfig.json`. Remove it — it conflicts
+with the single-tsconfig setup below:
 
 ```bash
-npm install \
-  @tanstack/react-router \
-  @tanstack/react-query \
-  @tanstack/react-query-devtools \
-  pocketbase
+rm -f tsconfig.app.json
 ```
-
-### Step 3 — Install dev dependencies
-
-```bash
-npm install -D \
-  @tanstack/router-plugin \
-  tailwindcss \
-  @tailwindcss/vite \
-  prettier \
-  prettier-plugin-tailwindcss \
-  vitest \
-  @vitest/coverage-v8 \
-  @vitest/ui \
-  @testing-library/react \
-  @testing-library/user-event \
-  @testing-library/jest-dom \
-  jsdom
-```
-
-### Step 4 — Initialise shadcn/ui
-
-```bash
-npx shadcn@latest init --defaults
-```
-
-If prompted for style, select **new-york**. If prompted for base colour, select **zinc**.
-
-Then add the starter component set:
-
-```bash
-npx shadcn@latest add button card input label badge
-```
-
-### Step 5 — Write config files
 
 Write each file below to the project root exactly as shown.
 
@@ -104,6 +72,7 @@ Write each file below to the project root exactly as shown.
 #### `vite.config.ts`
 
 ```ts
+/// <reference types="vitest/config" />
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
@@ -158,7 +127,8 @@ export default defineConfig({
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
     "baseUrl": ".",
-    "paths": { "@/*": ["./src/*"] }
+    "paths": { "@/*": ["./src/*"] },
+    "ignoreDeprecations": "6.0"
   },
   "include": ["src"],
   "references": [{ "path": "./tsconfig.node.json" }]
@@ -197,6 +167,57 @@ export default {
   tabWidth: 2,
   plugins: ['prettier-plugin-tailwindcss'],
 }
+```
+
+---
+
+#### `eslint.config.js` — replace the Vite default entirely
+
+Route files export both a `Route` constant and a component, and shadcn/ui files export
+variants alongside components. The default Vite ESLint config has no overrides for these,
+causing `react-refresh/only-export-components` warnings that fail `--max-warnings 0`.
+Replace the generated file entirely:
+
+```js
+import js from '@eslint/js'
+import globals from 'globals'
+import reactHooks from 'eslint-plugin-react-hooks'
+import reactRefresh from 'eslint-plugin-react-refresh'
+import tseslint from 'typescript-eslint'
+
+export default tseslint.config(
+  { ignores: ['dist', 'src/routeTree.gen.ts', 'src/components/ui/'] },
+  {
+    extends: [js.configs.recommended, ...tseslint.configs.recommended],
+    files: ['**/*.{ts,tsx}'],
+    languageOptions: {
+      ecmaVersion: 2020,
+      globals: globals.browser,
+    },
+    plugins: {
+      'react-hooks': reactHooks,
+      'react-refresh': reactRefresh,
+    },
+    rules: {
+      ...reactHooks.configs.recommended.rules,
+      'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
+    },
+  },
+  {
+    // Route and context files export both Route definitions and components — disable HMR rule
+    files: ['src/routes/**/*.{ts,tsx}', 'src/context/**/*.{ts,tsx}'],
+    rules: {
+      'react-refresh/only-export-components': 'off',
+    },
+  },
+  {
+    // Test files don't need HMR lint rules
+    files: ['src/test/**/*.{ts,tsx}', 'src/**/__tests__/**/*.{ts,tsx}'],
+    rules: {
+      'react-refresh/only-export-components': 'off',
+    },
+  },
+)
 ```
 
 ---
@@ -275,6 +296,17 @@ export default {
 
 ---
 
+#### `src/vite-env.d.ts`
+
+```ts
+/// <reference types="vite/client" />
+```
+
+Vite generates this file during `npm create vite`, but shadcn init may remove it. Write it
+explicitly so `import.meta.env` always has types.
+
+---
+
 #### `.env.example`
 
 ```env
@@ -313,6 +345,53 @@ Thumbs.db
     "ms-vscode.vscode-typescript-next"
   ]
 }
+```
+
+---
+
+### Step 3 — Initialise shadcn/ui
+
+> **Note:** shadcn init rewrites `package.json`. Running it here — before the `npm install`
+> steps below — ensures it cannot remove dependencies you have already installed.
+
+```bash
+npx shadcn@latest init --defaults
+```
+
+If prompted for style, select **new-york**. If prompted for base colour, select **zinc**.
+
+Then add the starter component set:
+
+```bash
+npx shadcn@latest add button card input label badge
+```
+
+### Step 4 — Install runtime dependencies
+
+```bash
+npm install \
+  @tanstack/react-router \
+  @tanstack/react-query \
+  @tanstack/react-query-devtools \
+  pocketbase
+```
+
+### Step 5 — Install dev dependencies
+
+```bash
+npm install -D \
+  @tanstack/router-plugin \
+  tailwindcss \
+  @tailwindcss/vite \
+  prettier \
+  prettier-plugin-tailwindcss \
+  vitest \
+  @vitest/coverage-v8 \
+  @vitest/ui \
+  @testing-library/react \
+  @testing-library/user-event \
+  @testing-library/jest-dom \
+  jsdom
 ```
 
 ---
@@ -501,7 +580,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
 export const Route = createFileRoute('/')({ component: HomePage })
 
-function HomePage() {
+export function HomePage() {
   return (
     <div className="flex flex-col gap-8">
       <div>
@@ -897,7 +976,7 @@ export function rejectWith(message: string, status = 400) {
 import { describe, it, expect } from 'vitest'
 import { screen } from '@testing-library/react'
 import { render } from '@/test/test-utils'
-import HomePage from '@/routes/index'
+import { HomePage } from '@/routes/index'
 
 describe('HomePage', () => {
   it('renders the welcome heading', () => {
@@ -976,7 +1055,30 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { AuthProvider, useAuth } from '@/context/AuthContext'
-import { mockPb, mockAuthRecord } from '@/test/mocks/pb'
+import { mockAuthRecord } from '@/test/mocks/handlers'
+
+// vi.mock is hoisted above imports by Vitest, so mockPb must be defined with vi.hoisted()
+// rather than imported — otherwise it's undefined when the factory runs.
+const mockPb = vi.hoisted(() => ({
+  authStore: {
+    record: null as unknown,
+    isValid: false,
+    token: '',
+    clear: vi.fn(),
+    onChange: vi.fn(() => () => {}),
+  },
+  collection: vi.fn(() => ({
+    authWithPassword: vi.fn(),
+    getList: vi.fn(),
+    getOne: vi.fn(),
+    create: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
+    subscribe: vi.fn(),
+    unsubscribe: vi.fn(),
+  })),
+  autoCancellation: vi.fn(),
+}))
 
 vi.mock('@/lib/pb', () => ({ default: mockPb }))
 
